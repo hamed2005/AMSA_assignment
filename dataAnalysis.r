@@ -16,7 +16,7 @@ pairs(mirnaDF)
 mirna <- mirnaDF[,3:14]
 
 ## centering and normalizing the data (unit variance)
-mirna.c <- scale(mirna, scale = T)
+mirna.c <- scale(mirna, scale = F, center = T)
 mirna.mean <- attr(mirna.c, "scaled:center")
 mirna <- mirna.c[,]
 
@@ -25,12 +25,28 @@ mirna.cov <- cov(mirna)     ##same as cor matrix
 mirna.cor <- cor(mirna)
 
 ## PCA
-mirna.pca <- princomp(mirna)    ##using correlation matrix
+mirna.pca <- princomp(mirna, cor = T)    ##using correlation matrix
 mirna.pca
 screeplot(mirna.pca, type="lines")
 
 mirna.pca$sdev
 mirna.pca$loadings
+
+summary(mirna.pca)
+
+par(mfrow = c(3,3))
+
+plot(mirna.pca$scores[,1]~mirna.pca$scores[,2], xlim = c(-5,+5), ylim = c(-5,+5) ,cex=0.5)
+plot(mirna.pca$scores[,2]~mirna.pca$scores[,3], xlim = c(-5,+5), ylim = c(-5,+5) ,cex=0.5)
+plot(mirna.pca$scores[,3]~mirna.pca$scores[,4], xlim = c(-5,+5), ylim = c(-5,+5) ,cex=0.5)
+plot(mirna.pca$scores[,4]~mirna.pca$scores[,5], xlim = c(-5,+5), ylim = c(-5,+5) ,cex=0.5)
+plot(mirna.pca$scores[,5]~mirna.pca$scores[,6], xlim = c(-5,+5), ylim = c(-5,+5) ,cex=0.5)
+plot(mirna.pca$scores[,6]~mirna.pca$scores[,7], xlim = c(-5,+5), ylim = c(-5,+5) ,cex=0.5)
+plot(mirna.pca$scores[,7]~mirna.pca$scores[,8], xlim = c(-5,+5), ylim = c(-5,+5) ,cex=0.5)
+plot(mirna.pca$scores[,8]~mirna.pca$scores[,9], xlim = c(-5,+5), ylim = c(-5,+5) ,cex=0.5)
+plot(mirna.pca$scores[,9]~mirna.pca$scores[,10], xlim = c(-5,+5), ylim = c(-5,+5) ,cex=0.5)
+
+par(mfrow =c(1,1))
 
 
 ## Factor Analysis
@@ -38,21 +54,27 @@ mirna.pca$loadings
 ### Lets try to retain these 3 groups as a proof of concept.
 ### Classes are : Structural, thermodynamic and positional.
 
-##FA using PCA extraction
+##FA using PCA extraction --JUST FOR TESTING--
 mirna.pca <- eigen(mirna.cor)
-mirna.p <- mirna.pca$vectors[,1:3]
-mirna.d <- diag(sqrt(mirna.pca$values[1:3]))
+mirna.p <- mirna.pca$vectors[,1:5]
+mirna.d <- diag(sqrt(mirna.pca$values[1:5]))
 
 #factor loadings
 mirna.B <- mirna.p%*%mirna.d
 rownames(mirna.B) <- colnames(mirna)
-colnames(mirna.B) <- c("C1","C2","C3")    ##3 classes
+colnames(mirna.B) <- c("C1","C2","C3", "C4", "C5")    ##3 classes
 #psi residuals correlation
 mirna.psi <- mirna.cor - mirna.B%*%t(mirna.B)
+#communalities
+1-diag(mirna.psi)
+#RMS
+mirna.residuals <- (mirna.psi - diag(mirna.psi))^2
+mirna.RMS.overall <- sqrt(sum(mirna.residuals)/length(mirna.residuals))
+mirna.RMS.overall
 
 
-
-
+##FA using Maximum Likelihood
+mirna.fa <- factanal(mirna, 2, rotation = "promax", control = list(nstart=10))    ## nstart: number of starting points. o.w. ml wouldnt converge
 
 
 ## Biplot
