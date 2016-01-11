@@ -1,13 +1,13 @@
 library(plotrix)    ## for biplot
-
+library(rpart)      ## for Tree-based Modeling
 
 ##
 setwd("/home/hamed/KUL/Multivar/Project/HomoTarget")
 ##
 
 ## reading the CSV files for positive and negative instances
-pos <- read.csv("dataset.csv.p", header = FALSE, col.names = c("mirnaSeq","targetSeq", "tatalScore", "seedScore", "WCPairs", "WobblePairs", "mismatches", "NumberBulges", "A", "C", "G", "U", "AU", "minFreeEnergy"))
-neg <- read.csv("dataset.csv.n", header = FALSE, col.names = c("mirnaSeq","targetSeq", "tatalScore", "seedScore", "WCPairs", "WobblePairs", "mismatches", "NumberBulges", "A", "C", "G", "U", "AU", "minFreeEnergy"))
+pos <- read.csv("dataset.csv.p", header = FALSE, col.names = c("mirnaSeq","targetSeq", "totalScore", "seedScore", "WCPairs", "WobblePairs", "mismatches", "NumberBulges", "A", "C", "G", "U", "AU", "minFreeEnergy"))
+neg <- read.csv("dataset.csv.n", header = FALSE, col.names = c("mirnaSeq","targetSeq", "totalScore", "seedScore", "WCPairs", "WobblePairs", "mismatches", "NumberBulges", "A", "C", "G", "U", "AU", "minFreeEnergy"))
 
 ## appending two dataframes into one
 mirnaDF <- rbind(pos,neg)
@@ -142,7 +142,59 @@ PCA.biplot(mirna)
 
 ## Tree based modelling
 
+par(mar=c(5,4,4,2) + 0.1)    ## to reset margin settings
+par(oma=c(3,3,3,3))
 
+##adding class variables
+pos<-cbind(pos,'positive')
+colnames(pos)[15]<-"class"
+neg<-cbind(neg,'negative')
+colnames(neg)[15]<-"class"
+##merging pos and neg to build the full dataset
+mirna <- rbind(pos,neg)[,3:15]
+
+mirna$class <- as.factor(mirna$class)
+
+##desicion tree construction using rpart
+
+mirna.rDTree <- rpart(class ~ + totalScore + seedScore + WCPairs +
+                                WobblePairs + mismatches + 
+                                NumberBulges + A + C + G + U + AU +
+                                minFreeEnergy, 
+                      data = mirna , method="class",
+                      parms=list(prior=c(0.5, 0.5)))
+
+##parameters #######TO BE SET
+rpart.control(minsplit=10,maxcompete=5,maxsurrogate=5,usesurrogate=2,xval=20,maxdepth=30)
+
+#summary(mirna.rDTree)
+par(xpd=NA)    ## to show the labels completely in output
+
+plot(mirna.rDTree, main = "Original Decision Tree")
+text(mirna.rDTree ,splits=T , use.n = T, all=F, cex = 0.7)
+
+
+##results of cross validation 
+plotcp(mirna.rDTree)
+
+##plotting cost complexity in reation to number of splits
+plot(mirna.rDTree$cptable[,2],mirna.rDTree$cptable[,1],
+     xlab='Numberbof splits',ylab='Cost complexity parameter,cp')
+
+##pruning
+mirna.rDTree.pruned <- prune(mirna.rDTree, cp = 0.02)
+
+plot(mirna.rDTree.pruned, uniform = F, main = "Pruned Decision Tree")
+text(mirna.rDTree.pruned, use.n = T, all = F, cex = 0.7)
+
+##plotting two trees side by side
+par(mfrow = c(1,2), xpd = NA)
+plot(mirna.rDTree, uniform = F, main = "Original Decision Tree")
+text(mirna.rDTree ,splits=T ,all=F, cex = 0.7)
+plot(mirna.rDTree.pruned, uniform = F, main = "Pruned Decision Tree")
+text(mirna.rDTree.pruned, cex = 0.7)
+
+print(mirna.rDTree.pruned)
 
 ## Discriminant Analysis
 
