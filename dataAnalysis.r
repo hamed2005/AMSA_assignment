@@ -1,5 +1,6 @@
 library(plotrix)    ## for biplot
 library(rpart)      ## for Tree-based Modeling
+library(MASS)       ## for linear discriminant analysis
 
 ##
 setwd("/home/hamed/KUL/Multivar/Project/HomoTarget")
@@ -22,12 +23,13 @@ mirna <- mirnaDF[,3:14]
 mirna.c <- scale(mirna, scale = F, center = T)
 mirna.mean <- attr(mirna.c, "scaled:center")
 mirna <- mirna.c[,]
+mirna.n <- scale(mirna, scale = T, center = T)
 
 ## variance-covariance and correlation matrix extraction
 mirna.cov <- cov(mirna)     ##same as cor matrix
 mirna.cor <- cor(mirna)
 
-## PCA
+### PCA
 mirna.pca <- princomp(mirna, cor = T)    ##using correlation matrix
 mirna.pca
 screeplot(mirna.pca, type="lines")
@@ -52,7 +54,8 @@ plot(mirna.pca$scores[,9]~mirna.pca$scores[,10], xlim = c(-5,+5), ylim = c(-5,+5
 par(mfrow =c(1,1))
 
 
-## Factor Analysis
+### Factor Analysis
+
 ### It was mentioned in the paper that the dataset contains features from 3 classes.
 ### Lets try to retain these 3 groups as a proof of concept.
 ### Classes are : Structural, thermodynamic and positional.
@@ -72,15 +75,15 @@ mirna.psi <- mirna.cor - mirna.B%*%t(mirna.B)
 1-diag(mirna.psi)
 #RMS
 mirna.residuals <- (mirna.psi - diag(mirna.psi))^2
-mirna.RMS.overall <- sqrt(sum(mirna.residuals)/length(mirna.residuals))
+mirna.RMS.overall <- sqrt(sum(mirna.residuals)/length(mirna.residuals))    ##or /(ncol(mirna.residuals)*(ncol(mirna.residuals)-1))
 mirna.RMS.overall
 
 
 ##FA using Maximum Likelihood
-mirna.fa <- factanal(mirna, 2, rotation = "promax", control = list(nstart=10))    ## nstart: number of starting points. o.w. ml wouldnt converge
+mirna.fa <- factanal(mirna, 2, rotation = "promax", control = list(nstart=30))    ## nstart: number of starting points. o.w. ml wouldnt converge
 
 
-## Biplot
+### Biplot
 
 PCA.biplot<- function(x) {
         #x is the matrix to biplot, x is numeric, thus variables on ratio or interval scales
@@ -140,7 +143,7 @@ PCA.biplot(mirna)
 
 
 
-## Tree based modelling
+### Tree based modelling
 
 par(mar=c(5,4,4,2) + 0.1)    ## to reset margin settings
 par(oma=c(3,3,3,3))
@@ -157,10 +160,7 @@ mirna$class <- as.factor(mirna$class)
 
 ##desicion tree construction using rpart
 
-mirna.rDTree <- rpart(class ~ + totalScore + seedScore + WCPairs +
-                                WobblePairs + mismatches + 
-                                NumberBulges + A + C + G + U + AU +
-                                minFreeEnergy, 
+mirna.rDTree <- rpart(class ~ ., 
                       data = mirna , method="class",
                       parms=list(prior=c(0.5, 0.5)))
 
@@ -196,17 +196,121 @@ text(mirna.rDTree.pruned, cex = 0.7)
 
 print(mirna.rDTree.pruned)
 
-## Discriminant Analysis
+##misclassification error
+out <- predict(mirna.rDTree.pruned) # predict probabilities
+
+pred.response <- colnames(out)[max.col(out, ties.method = c("random"))] # predict response
+
+mean(mirna$class != pred.response) # % misclassification error
+
+### Discriminant Analysis
+
+mirna.lda <- lda(class~+seedScore + totalScore + seedScore + WCPairs + WobblePairs + mismatches + NumberBulges + A + C + G + U + AU + minFreeEnergy, data=mirna)
+#####NOTE:: VARIABLES ARE COLLINEAR######
+
+### Clustering
+
+dlimit <- min(apply(mirna.n,2,min)) -0.1
+ulimit <- max(apply(mirna.n,2,max)) +0.1
+
+par(mfrow = c(1,1))
+# Set up blank plot for profiles
+plot(c(0,12),c(dlimit, ulimit),type="n",xlab="Variables",ylab="Value",main="Profile Plot")
+
+for (k in (1:200))
+{
+        points(1:12,mirna.n[k,],type="l")
+}
+
+## modified andrews plot
+plot(c(-pi,pi),c(-7,6),type="n",xlab="Variables",ylab="Value",main="Modified Andrews Plot")
+t <-seq(-pi,pi,length=500)
+for (k in (1:nrow(mirna.n)))
+{
+        crseqm <- (1/sqrt(2))*(mirna.n[k,1]+mirna.n[k,2]*(sin(t)+cos(t)) + mirna.n[k,3]*(sin(t)-cos(t))+mirna.n[k,4]*(sin(2*t)+cos(2*t)))
+        if (min(crseqm) > dlimit)    ##just to have a better plot
+        {
+                points(t,crseqm,type="l")
+        }
+}
+
+## stars plot
+stars(mirna.n,draw.segments = F, cex=0.25, scale = T)
+
+## hierarchical clustering
+
+#computing the cluster object
+mirna.hclust <- hclust(dist(mirna.c), method="average")  # AVARAGE LINK
+
+# plclust plots the dendrogram for the cluster object.
+plot(mirna.hclust,xlab="mirna Data",ylab="Average Link Distance", sub="", label = F)
+# cutree finds the cluster groupings for a cluster object for a 
+# specifed (k) number of clusters.
+mirna.hclust.cut <- cutree(mirna.hclust,k=3)
+# You might want to see how many observations in each cluster.
+table(mirna.hclust.cut)
+
+# projection on the first 2 principal components
+#clusplot(mirna.c, mirna.hclust.cut,stand=TRUE,labels=5,main="Average link")
+
+# Compute pairwise plots for the data with color coded cluster ids.
+par(mfrow=c(1,2))
+plot(mirna$totalScore,mirna$seedScore, col = mirna.hclust.cut, cex=1.5,main="Average Link Clusters")
+plot(mirna$totalScore,mirna$WCPairs, col = mirna.hclust.cut, cex=1.5,main="Average Link Clusters")
+plot(mirna$totalScore,mirna$WobblePairs, col = mirna.hclust.cut, cex=1.5,main="Average Link Clusters")
+plot(mirna$totalScore,mirna$mismatches, col = mirna.hclust.cut, cex=1.5,main="Average Link Clusters")
+plot(mirna$totalScore,mirna$NumberBulges, col = mirna.hclust.cut, cex=1.5,main="Average Link Clusters")
+plot(mirna$totalScore,mirna$A, col = mirna.hclust.cut, cex=1.5,main="Average Link Clusters")
+plot(mirna$totalScore,mirna$C, col = mirna.hclust.cut, cex=1.5,main="Average Link Clusters")
+plot(mirna$totalScore,mirna$G, col = mirna.hclust.cut, cex=1.5,main="Average Link Clusters")
+plot(mirna$totalScore,mirna$U, col = mirna.hclust.cut, cex=1.5,main="Average Link Clusters")
+plot(mirna$totalScore,mirna$AU, col = mirna.hclust.cut, cex=1.5,main="Average Link Clusters")
+plot(mirna$totalScore,mirna$minFreeEnergy, col = mirna.hclust.cut, cex=1.5,main="Average Link Clusters")
+
+plot(mirna$minFreeEnergy,mirna$seedScore, col = mirna.hclust.cut, cex=1.5,main="Average Link Clusters")
+plot(mirna$minFreeEnergy,mirna$WCPairs, col = mirna.hclust.cut, cex=1.5,main="Average Link Clusters")
+plot(mirna$minFreeEnergy,mirna$WobblePairs, col = mirna.hclust.cut, cex=1.5,main="Average Link Clusters")
+plot(mirna$minFreeEnergy,mirna$mismatches, col = mirna.hclust.cut, cex=1.5,main="Average Link Clusters")
+plot(mirna$minFreeEnergy,mirna$NumberBulges, col = mirna.hclust.cut, cex=1.5,main="Average Link Clusters")
+plot(mirna$minFreeEnergy,mirna$A, col = mirna.hclust.cut, cex=1.5,main="Average Link Clusters")
+plot(mirna$minFreeEnergy,mirna$C, col = mirna.hclust.cut, cex=1.5,main="Average Link Clusters")
+plot(mirna$minFreeEnergy,mirna$G, col = mirna.hclust.cut, cex=1.5,main="Average Link Clusters")
+plot(mirna$minFreeEnergy,mirna$U, col = mirna.hclust.cut, cex=1.5,main="Average Link Clusters")
+plot(mirna$minFreeEnergy,mirna$AU, col = mirna.hclust.cut, cex=1.5,main="Average Link Clusters")
+plot(mirna$minFreeEnergy,mirna$totalScore, col = mirna.hclust.cut, cex=1.5,main="Average Link Clusters")
+
+## KMeans
+mirna.kmclust <- kmeans(mirna.c, 5, 20)
+
+# Perform the pairwise plots with color coded cluster id included.
+
+plot(mirna$minFreeEnergy,mirna$totalScore, col = mirna.kmclust$cluster)
+points(mirna.kmclust$centers[,c(1,2)], col = 1:2, pch ="+", cex=2)
+
+plot(mirna$minFreeEnergy,mirna$A, col = mirna.kmclust$cluster)
+points(mirna.kmclust$centers[,c(1,3)], col = 1:2, pch ="+", cex=2)
+
+plot(mirna$minFreeEnergy,mirna$AU, col = mirna.kmclust$cluster)
+points(mirna.kmclust$centers[,c(1,4)], col = 1:2, pch ="+", cex=2)
+
+plot(mirna$minFreeEnergy,mirna$NumberBulges, col = mirna.kmclust$cluster)
+points(mirna.kmclust$centers[,c(2,3)], col = 1:2, pch ="+", cex=2)
+
+plot(mirna$WobblePairs,mirna$AU, col = mirna.kmclust$cluster)
+points(mirna.kmclust$centers[,c(2,4)], col = 1:2, pch ="+", cex=2)
+
+# Run the kmeans clustering on the first two PCs
+mirna.pca <- princomp(mirna.n)
+mirna.pckclust <- kmeans(mirna.pca$scores, 2, 20)
+plot(mirna.pca$scores[,1:2], col = mirna.pckclust$cluster)
+points(mirna.pckclust$centers[,c(1,2)], col = 1:2, pch ="+", cex=2)
+title ("K Means Cluster on first two PCs")
+#clusplot(mirna.n,mirna.pckclust$cluster,stand=TRUE,labels=2,main="kmeans, 2 clusters")
+
+### HICUUP!
 
 
-## Clustering
 
-
-
-## HICUUP!
-
-
-
-## Multidimensional scaling
+### Multidimensional scaling
 
 
