@@ -1,23 +1,91 @@
 library(plotrix)    ## for biplot
 library(rpart)      ## for Tree-based Modeling
 library(MASS)       ## for linear discriminant analysis
+library(DMwR)      ## for outlier detection
 
-##
+## setting the working directory
 setwd("/home/hamed/KUL/Multivar/Project/HomoTarget")
 ##
 
 ## reading the CSV files for positive and negative instances
-pos <- read.csv("dataset.csv.p", header = FALSE, col.names = c("mirnaSeq","targetSeq", "totalScore", "seedScore", "WCPairs", "WobblePairs", "mismatches", "NumberBulges", "A", "C", "G", "U", "AU", "minFreeEnergy"))
-neg <- read.csv("dataset.csv.n", header = FALSE, col.names = c("mirnaSeq","targetSeq", "totalScore", "seedScore", "WCPairs", "WobblePairs", "mismatches", "NumberBulges", "A", "C", "G", "U", "AU", "minFreeEnergy"))
+colnames <- c("mirnaSeq","targetSeq", "totalScore", "seedScore", "WCPairs", "WobblePairs", "mismatches", "NumberBulges", "A", "C", "G", "U", "AU", "minFreeEnergy")
+pos <- read.csv("dataset.csv.p", header = FALSE, col.names = colnames)
+neg <- read.csv("dataset.csv.n", header = FALSE, col.names = colnames)
 
 ## appending two dataframes into one
 mirnaDF <- rbind(pos,neg)
+## omitting the sequence columns
+mirna <- mirnaDF[,3:14]
 
 ## overview
-summary(mirnaDF)
-pairs(mirnaDF)
+summary(mirna)
 
-mirna <- mirnaDF[,3:14]
+## pairs plot
+pairs(mirna, pch=20, col="#383838")
+
+
+### outlier detection
+outlier.scores <- lofactor(mirna, k = 5)    ##K = # of neighbors used in the calculation of the local outlier factors
+plot(density(outlier.scores))
+## pick top 5 as outliers
+outliers <- order(outlier.scores, decreasing=T)[1:5]
+## who are outliers
+print(outliers)
+
+n <- nrow(mirna)
+labels <- 1:n
+labels[-outliers] <- ""
+
+## showing outliers in biplot
+x<-mirna
+
+xm<-apply(x,2,mean)
+y<-sweep(x,2,xm)
+ss<-(t(y)%*%as.matrix(y))
+s<-ss/(nrow(x)-1)
+d<-(diag(ss))^(-1/2)
+e<-diag(d,nrow=ncol(x),ncol=ncol(x))
+z<-as.matrix(y)%*%e
+r<-t(z)%*%z
+q<-svd(z)
+gfd<-((q$d[1])+(q$d[2]))/sum(q$d)
+gfz<-(((q$d[1])^2)+((q$d[2])^2))/sum((q$d)^2)
+gfr<-(((q$d[1])^4)+((q$d[2])^4))/sum((q$d)^4)
+l<-diag(q$d,nrow=ncol(x),ncol=ncol(x))
+R.B<-q$u        #scores matrix
+C.B<-q$v%*%l    #loadings
+
+#possibility to stretch scores by a scale factor
+scalefactor<-3.5
+R.B<-q$u *scalefactor
+
+par(mar=c(4,4,4,4),pty='s',oma=c(5,0,0,0),font=2)
+plot(R.B[ ,1],R.B[ ,2],axes=F,xlim=c(-1,1),ylim=c(-1,1),xlab=' ',ylab=' ',cex=.8)
+mtext('First component',side=1,line=3,cex=.8)
+mtext('Second component',side=2,line=3,cex=.8)
+axis(1,at=c(-1,-.8,-.6,-.4,-.2,0,.2,.4,.6,.8,1),cex=.8)
+axis(2,at=c(-1,-.8,-.6,-.4,-.2,0,.2,.4,.6,.8,1),cex=.8)
+box( )
+
+###display outlier obs number on the biplot
+text(R.B[,1]-.05,R.B[,2]+.05,as.character(labels),cex=0.5)
+points(R.B[,1],R.B[,2],pch=".")
+
+
+points(C.B[,1],C.B[,2],pch=".")
+text(C.B[,1]-.05,C.B[,2]+.05,as.character(dimnames(x)[[2]]),cex=0.8)
+
+## drawing the arrows
+for (i in seq(1,nrow(C.B),by=1))
+        arrows(0,0,C.B[i,1],C.B[i,2])
+
+#Draw circle unit
+draw.circle(0,0,1,border='black')
+
+#removing outliers
+mirna <- mirna[-103,]
+mirna <- mirna[-94,]
+
 
 ## centering and normalizing the data (unit variance)
 mirna.c <- scale(mirna, scale = F, center = T)
@@ -34,7 +102,6 @@ mirna.pca <- princomp(mirna, cor = T)    ##using correlation matrix
 mirna.pca
 screeplot(mirna.pca, type="lines")
 
-mirna.pca$sdev
 mirna.pca$loadings
 
 summary(mirna.pca)
@@ -54,92 +121,52 @@ plot(mirna.pca$scores[,9]~mirna.pca$scores[,10], xlim = c(-5,+5), ylim = c(-5,+5
 par(mfrow =c(1,1))
 
 
-### Factor Analysis
-
-### It was mentioned in the paper that the dataset contains features from 3 classes.
-### Lets try to retain these 3 groups as a proof of concept.
-### Classes are : Structural, thermodynamic and positional.
-
-##FA using PCA extraction --JUST FOR TESTING--
-mirna.pca <- eigen(mirna.cor)
-mirna.p <- mirna.pca$vectors[,1:5]
-mirna.d <- diag(sqrt(mirna.pca$values[1:5]))
-
-#factor loadings
-mirna.B <- mirna.p%*%mirna.d
-rownames(mirna.B) <- colnames(mirna)
-colnames(mirna.B) <- c("C1","C2","C3", "C4", "C5")    ##3 classes
-#psi residuals correlation
-mirna.psi <- mirna.cor - mirna.B%*%t(mirna.B)
-#communalities
-1-diag(mirna.psi)
-#RMS
-mirna.residuals <- (mirna.psi - diag(mirna.psi))^2
-mirna.RMS.overall <- sqrt(sum(mirna.residuals)/length(mirna.residuals))    ##or /(ncol(mirna.residuals)*(ncol(mirna.residuals)-1))
-mirna.RMS.overall
-
-
-##FA using Maximum Likelihood
-mirna.fa <- factanal(mirna, 2, rotation = "promax", control = list(nstart=30))    ## nstart: number of starting points. o.w. ml wouldnt converge
-
 
 ### Biplot
+x <- mirna
+xm<-apply(x,2,mean)
+y<-sweep(x,2,xm)
+ss<-(t(y)%*%y)
+s<-ss/(nrow(x)-1)
+d<-(diag(ss))^(-1/2)
+e<-diag(d,nrow=ncol(x),ncol=ncol(x))
+z<-y%*%e
+r<-t(z)%*%z
+q<-svd(z)
+gfd<-((q$d[1])+(q$d[2]))/sum(q$d)
+gfz<-(((q$d[1])^2)+((q$d[2])^2))/sum((q$d)^2)
+gfr<-(((q$d[1])^4)+((q$d[2])^4))/sum((q$d)^4)
+l<-diag(q$d,nrow=ncol(x),ncol=ncol(x))
+R.B<-q$u        #scores matrix
+C.B<-q$v%*%l    #loadings
 
-PCA.biplot<- function(x) {
-        #x is the matrix to biplot, x is numeric, thus variables on ratio or interval scales
-        #x has dimnames(x)[[2]] defined (and eventually dimnames(x)[[1]] defined)
-        xm<-apply(x,2,mean)
-        y<-sweep(x,2,xm)
-        ss<-(t(y)%*%y)
-        s<-ss/(nrow(x)-1)
-        d<-(diag(ss))^(-1/2)
-        e<-diag(d,nrow=ncol(x),ncol=ncol(x))
-        z<-y%*%e
-        r<-t(z)%*%z
-        q<-svd(z)
-        gfd<-((q$d[1])+(q$d[2]))/sum(q$d)
-        gfz<-(((q$d[1])^2)+((q$d[2])^2))/sum((q$d)^2)
-        gfr<-(((q$d[1])^4)+((q$d[2])^4))/sum((q$d)^4)
-        l<-diag(q$d,nrow=ncol(x),ncol=ncol(x))
-        R.B<-q$u        #scores matrix
-        C.B<-q$v%*%l    #loadings
-        #possibility to stretch scores by a scale factor
-        scalefactor<-3.5
-        R.B<-q$u *scalefactor
+#possibility to stretch scores by a scale factor
+scalefactor<-3.5
+R.B<-q$u *scalefactor
         
-        par(mar=c(4,4,4,4),pty='s',oma=c(5,0,0,0),font=2)
-        plot(R.B[ ,1],R.B[ ,2],axes=F,xlim=c(-1,1),ylim=c(-1,1),xlab=' ',ylab=' ',cex=.8)
-        mtext('First component',side=1,line=3,cex=.8)
-        mtext('Second component',side=2,line=3,cex=.8)
-        axis(1,at=c(-1,-.8,-.6,-.4,-.2,0,.2,.4,.6,.8,1),cex=.8)
-        axis(2,at=c(-1,-.8,-.6,-.4,-.2,0,.2,.4,.6,.8,1),cex=.8)
-        box( )
-        
-        #ability to plot rownames on the plot, dimnames(x)[[1]] necessary
-        
-        ###could be uncommented to display obs numbers on plot
-        #text(R.B[,1]-.05,R.B[,2]+.05,as.character(dimnames(x)[[1]]),cex=0.5)
-        points(R.B[,1],R.B[,2],pch=".")
-        
-        
-        points(C.B[,1],C.B[,2],pch=".")
-        text(C.B[,1]-.05,C.B[,2]+.05,as.character(dimnames(x)[[2]]),cex=0.8)
-        
-        ## drawing the arrows
-        for (i in seq(1,nrow(C.B),by=1))
-                arrows(0,0,C.B[i,1],C.B[i,2])
-        
-        #Draw circle unit
-        draw.circle(0,0,1,border='black')
-        
-        ##printing some statistics to output
-        mtext('PCA Biplot',side=1,outer=T,cex=1,line=3)
-        results<-list('correlation matrix'=r,'column effects'=C.B,'row effects'=R.B)
-        cat('The goodness of fit for the correlation matrix is',gfr,'for the centered, standardized design matrix',gfz,'and for the Mahalanobis distances is',gfd,' ') 
-        results
-}
+par(mar=c(4,4,4,4),pty='s',oma=c(5,0,0,0),font=2)
+plot(R.B[ ,1],R.B[ ,2],axes=F,xlim=c(-1,1),ylim=c(-1,1),xlab=' ',ylab=' ',cex=.8)
+mtext('First component',side=1,line=3,cex=.8)
+mtext('Second component',side=2,line=3,cex=.8)
+axis(1,at=c(-1,-.8,-.6,-.4,-.2,0,.2,.4,.6,.8,1),cex=.8)
+axis(2,at=c(-1,-.8,-.6,-.4,-.2,0,.2,.4,.6,.8,1),cex=.8)
+box( )
 
-PCA.biplot(mirna)
+points(R.B[,1],R.B[,2],pch=".")
+
+
+points(C.B[,1],C.B[,2],pch=".")
+text(C.B[,1]-.05,C.B[,2]+.05,as.character(dimnames(x)[[2]]),cex=0.8)
+
+## drawing the arrows
+for (i in seq(1,nrow(C.B),by=1))
+        arrows(0,0,C.B[i,1],C.B[i,2])
+
+#Draw circle unit
+draw.circle(0,0,1,border='black')
+        
+mtext('PCA Biplot',side=1,outer=T,cex=1,line=3)
+#PCA.biplot(mirna)
 
 
 
@@ -157,6 +184,10 @@ colnames(neg)[15]<-"class"
 mirna <- rbind(pos,neg)[,3:15]
 
 mirna$class <- as.factor(mirna$class)
+
+##removing the outliers
+mirna <- mirna[-103,]
+mirna <- mirna[-94,]
 
 ##desicion tree construction using rpart
 
@@ -182,10 +213,10 @@ plot(mirna.rDTree$cptable[,2],mirna.rDTree$cptable[,1],
      xlab='Numberbof splits',ylab='Cost complexity parameter,cp')
 
 ##pruning
-mirna.rDTree.pruned <- prune(mirna.rDTree, cp = 0.02)
+mirna.rDTree.pruned <- prune(mirna.rDTree, cp = 0.062)
 
 plot(mirna.rDTree.pruned, uniform = F, main = "Pruned Decision Tree")
-text(mirna.rDTree.pruned, use.n = T, all = F, cex = 0.7)
+text(mirna.rDTree.pruned, use.n = T, all = T, cex = 0.7)
 
 ##plotting two trees side by side
 par(mfrow = c(1,2), xpd = NA)
@@ -196,18 +227,34 @@ text(mirna.rDTree.pruned, cex = 0.7)
 
 print(mirna.rDTree.pruned)
 
-##misclassification error
-out <- predict(mirna.rDTree.pruned) # predict probabilities
-
+##misclassification error and CV for unpruned tree
+out <- predict(mirna.rDTree) # predict probabilities
 pred.response <- colnames(out)[max.col(out, ties.method = c("random"))] # predict response
-
 mean(mirna$class != pred.response) # % misclassification error
+table(mirna$class, pred.response)
+
+##misclassification error and CV for pruned tree
+out <- predict(mirna.rDTree.pruned) # predict probabilities
+pred.response <- colnames(out)[max.col(out, ties.method = c("random"))] # predict response
+mean(mirna$class != pred.response) # % misclassification error
+table(mirna$class, pred.response)
 
 ### Discriminant Analysis
 
-mirna.lda <- lda(class~+seedScore + totalScore + seedScore + WCPairs + WobblePairs + mismatches + NumberBulges + A + C + G + U + AU + minFreeEnergy, data=mirna)
+mirna.lda <- lda(class~ + totalScore + seedScore + WCPairs + WobblePairs + mismatches + NumberBulges + A + C + G + U + AU + minFreeEnergy, data=mirna)
 #####NOTE:: VARIABLES ARE COLLINEAR######
+## LDA using first 9 PCs
+mirna.lda <- lda(mirna$class~+mirna.pca$scores[,1:9])
+plot(mirna.lda)
+## cross-validation
+mirna.lda <- lda(mirna$class~+mirna.pca$scores[,1:9], CV=T)
+head(mirna.lda$posterior)
+table(mirna$class, mirna.lda$class, dnn = c("From", "classified into"))
 
+## lda using the variables used by tree
+mirna.lda.tree <- lda(class ~ + totalScore + seedScore + WCPairs + WobblePairs + NumberBulges + C + G + AU + minFreeEnergy, data = mirna, CV=T)
+head(mirna.lda.tree$posterior)
+table(mirna$class, mirna.lda.tree$class, dnn = c("From", "classified into"))
 ### Clustering
 
 dlimit <- min(apply(mirna.n,2,min)) -0.1
@@ -228,10 +275,7 @@ t <-seq(-pi,pi,length=500)
 for (k in (1:nrow(mirna.n)))
 {
         crseqm <- (1/sqrt(2))*(mirna.n[k,1]+mirna.n[k,2]*(sin(t)+cos(t)) + mirna.n[k,3]*(sin(t)-cos(t))+mirna.n[k,4]*(sin(2*t)+cos(2*t)))
-        if (min(crseqm) > dlimit)    ##just to have a better plot
-        {
-                points(t,crseqm,type="l")
-        }
+        points(t,crseqm,type="l")
 }
 
 ## stars plot
@@ -243,7 +287,7 @@ stars(mirna.n,draw.segments = F, cex=0.25, scale = T)
 mirna.hclust <- hclust(dist(mirna.c), method="average")  # AVARAGE LINK
 
 # plclust plots the dendrogram for the cluster object.
-plot(mirna.hclust,xlab="mirna Data",ylab="Average Link Distance", sub="", label = F)
+plot(mirna.hclust,xlab="mirna Data",ylab="Average Link Distance", sub="", labels = F)
 # cutree finds the cluster groupings for a cluster object for a 
 # specifed (k) number of clusters.
 mirna.hclust.cut <- cutree(mirna.hclust,k=3)
@@ -300,6 +344,7 @@ plot(mirna$WobblePairs,mirna$AU, col = mirna.kmclust$cluster)
 points(mirna.kmclust$centers[,c(2,4)], col = 1:2, pch ="+", cex=2)
 
 # Run the kmeans clustering on the first two PCs
+par(mfrow=c(1,1))
 mirna.pca <- princomp(mirna.n)
 mirna.pckclust <- kmeans(mirna.pca$scores, 2, 20)
 plot(mirna.pca$scores[,1:2], col = mirna.pckclust$cluster)
@@ -307,10 +352,32 @@ points(mirna.pckclust$centers[,c(1,2)], col = 1:2, pch ="+", cex=2)
 title ("K Means Cluster on first two PCs")
 #clusplot(mirna.n,mirna.pckclust$cluster,stand=TRUE,labels=2,main="kmeans, 2 clusters")
 
-### HICUUP!
+### Factor Analysis
+
+### It was mentioned in the paper that the dataset contains features from 3 classes.
+### Lets try to retain these 3 groups as a proof of concept.
+### Classes are : Structural, thermodynamic and positional.
+
+##FA using PCA extraction --JUST FOR TESTING--
+mirna.pca <- eigen(mirna.cor)
+mirna.p <- mirna.pca$vectors[,1:5]
+mirna.d <- diag(sqrt(mirna.pca$values[1:5]))
+
+#factor loadings
+mirna.B <- mirna.p%*%mirna.d
+rownames(mirna.B) <- colnames(mirna[,1:12])
+colnames(mirna.B) <- c("C1","C2","C3", "C4", "C5")    ##3 classes
+#psi residuals correlation
+mirna.psi <- mirna.cor - mirna.B%*%t(mirna.B)
+#communalities
+1-diag(mirna.psi)
+#RMS
+mirna.residuals <- (mirna.psi - diag(mirna.psi))^2
+mirna.RMS.overall <- sqrt(sum(mirna.residuals)/length(mirna.residuals))    ##or /(ncol(mirna.residuals)*(ncol(mirna.residuals)-1))
+mirna.RMS.overall
 
 
+##FA using Maximum Likelihood
+mirna.fa <- factanal(mirna[,1:12], 2, rotation = "promax", control = list(nstart=30))    ## nstart: number of starting points. o.w. ml wouldnt converge
 
-### Multidimensional scaling
-
-
+mirna.fa$loadings
